@@ -20,15 +20,13 @@
 <body class="antialiased text-slate-800">
 
   <div class="max-w-7xl mx-auto px-4 py-8 space-y-6">
-    
-    <!-- Başlık -->
     <header class="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-6 rounded-[1.5rem] shadow-sm border border-white">
       <div>
         <h1 class="text-2xl font-extrabold text-slate-800 tracking-tight">Performans Karşılaştırma Paneli</h1>
         <p id="dateRangeText" class="text-slate-400 text-sm font-medium mt-1 italic">Veriler yükleniyor...</p>
       </div>
       <div class="flex items-center gap-3">
-        <button onclick="refreshDashboard()" class="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all">
+        <button onclick="refreshDashboard()" class="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all" title="Yenile">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg>
         </button>
         <button onclick="downloadPDF()" id="pdfBtn" class="bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-emerald-700 shadow-lg transition-all flex items-center gap-2">
@@ -102,104 +100,89 @@
     let fullData = []; 
 
     window.onload = () => {
-      // Varsayılan değerleri kullanıcı isteğine göre ayarla
-      document.getElementById('tarih').value = "2026-02-09";
-      document.getElementById('filterStart').value = "2026-02-02";
-      document.getElementById('filterEnd').value = "2026-02-09";
-      
+      document.getElementById('tarih').valueAsDate = new Date();
+      clearFilter();
       refreshDashboard();
     };
 
     function clearFilter() {
-      document.getElementById('filterStart').value = "2026-02-02";
-      document.getElementById('filterEnd').value = "2026-02-09";
+      const today = new Date();
+      const lastMonth = new Date();
+      lastMonth.setDate(today.getDate() - 30);
+      document.getElementById('filterStart').valueAsDate = lastMonth;
+      document.getElementById('filterEnd').valueAsDate = today;
+      // Veri varsa filtreyi uygula, yoksa bekle
       if (fullData.length > 0) applyFilter();
     }
 
-    /**
-     * Daha güvenli ve hata ayıklaması kolay API çağrısı
-     */
     async function apiCall(action, params = {}) {
-      // 1. Google Apps Script içindeysek yerel fonksiyonu kullan
-      if (typeof google !== 'undefined' && google && google.script && google.script.run) {
-        return new Promise((resolve, reject) => {
-          google.script.run
-            .withSuccessHandler(resolve)
-            .withFailureHandler((err) => {
-              console.error("Apps Script Hatası:", err);
-              reject(err);
-            })[action](params);
-        });
-      }
-
-      // 2. Dışarıdaysak (Preview/Canvas) Fetch kullan
       const url = new URL(API_URL);
       url.searchParams.append('action', action);
-      Object.keys(params).forEach(key => {
-        if (params[key] !== undefined) url.searchParams.append(key, params[key]);
-      });
+      // Cache-busting: Tarayıcının eski veriyi getirmesini engelle
+      url.searchParams.append('_t', Date.now());
+      
+      Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
       
       try {
-        // Redirect: 'follow' Apps Script için zorunludur
-        const response = await fetch(url.toString(), { 
-          method: 'GET',
-          mode: 'cors',
-          cache: 'no-cache',
-          redirect: 'follow' 
+        const response = await fetch(url.toString(), {
+          method: "GET",
+          redirect: "follow" // Yönlendirmeleri takip et
         });
 
-        if (!response.ok) {
-          throw new Error(`HTTP hatası! Durum: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
 
         const text = await response.text();
-        
         try {
           return JSON.parse(text);
         } catch (e) {
-          // Yanıt JSON değilse (genellikle submitData sonrası oluşur)
-          if (action === 'submitData' || text.length < 100) {
-             return { success: true };
-          }
-          throw new Error("Yanıt JSON formatında değil.");
+          // Eğer submitData işlemiyse ve JSON hatası varsa (bazen boş dönebilir), başarılı say
+          if (action === 'submitData') return { success: true };
+          throw new Error("Sunucudan geçerli veri alınamadı.");
         }
       } catch (error) {
-        console.error("API Bağlantı Hatası:", error);
-        // Kullanıcıyı bilgilendir
-        if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
-           console.warn("İpucu: Apps Script 'Anyone' (Herkes) olarak dağıtılmamış olabilir veya CORS kısıtlaması var.");
-        }
+        console.error("API Hatası:", error);
         throw error;
       }
     }
 
     async function refreshDashboard() {
       const loader = document.getElementById('loader');
+      const tableBody = document.getElementById('dataTable');
       loader.classList.remove('hidden');
+      
       try {
         fullData = await apiCall('getDashboardData');
-        if (Array.isArray(fullData)) {
-          fullData.sort((a, b) => new Date(a[0]) - new Date(b[0]));
-          applyFilter(); 
+        
+        if (!Array.isArray(fullData)) {
+            // Eğer veri boşsa ama hata yoksa, boş dizi kabul et
+            if (fullData && fullData.success === false) {
+                 throw new Error(fullData.error || "Bilinmeyen hata");
+            }
+            fullData = []; 
         }
+
+        // Verileri tarihe göre sırala (Eskiden yeniye)
+        fullData.sort((a, b) => new Date(a[0]) - new Date(b[0]));
+        applyFilter(); 
       } catch (e) {
-        console.error("Dashboard yüklenemedi:", e);
+        console.error("Dashboard yüklenemedi", e);
+        tableBody.innerHTML = `<tr><td colspan="8" class="p-10 text-center text-red-500 font-bold">Veri yüklenemedi: ${e.message}.<br>Lütfen internet bağlantınızı kontrol edin veya sayfayı yenileyin.</td></tr>`;
       } finally {
         loader.classList.add('hidden');
       }
     }
 
     function applyFilter() {
-      const startVal = document.getElementById('filterStart').value;
-      const endVal = document.getElementById('filterEnd').value;
+      const startInput = document.getElementById('filterStart').value;
+      const endInput = document.getElementById('filterEnd').value;
       
-      if (!startVal || !endVal) return;
+      if (!startInput || !endInput) return;
 
-      const start = new Date(startVal);
-      const end = new Date(endVal);
+      const start = new Date(startInput);
+      const end = new Date(endInput);
       end.setHours(23, 59, 59);
 
-      document.getElementById('dateRangeText').innerText = `${start.toLocaleDateString('tr-TR')} - ${end.toLocaleDateString('tr-TR')} tarihleri arası analiz`;
+      document.getElementById('dateRangeText').innerText = `${start.toLocaleDateString('tr-TR')} - ${end.toLocaleDateString('tr-TR')} aralığı`;
 
       const filtered = fullData.filter(row => {
         const d = new Date(row[0]);
@@ -214,7 +197,7 @@
       tableBody.innerHTML = '';
       
       if (!filtered || filtered.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="8" class="p-20 text-center text-slate-400 font-medium">Seçili aralıkta veri yok.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="8" class="p-20 text-center text-slate-400 font-medium">Bu aralıkta veri yok.</td></tr>';
         return;
       }
 
@@ -226,11 +209,12 @@
         const comments = parseInt(row[2]) || 0;
         const score = parseFloat(row[3]) || 0;
 
+        // O tarih aralığındaki en son kaydı güncelle
         if (!stores[name] || date >= stores[name].last.date) {
-          // Bir önceki kaydı tüm veri içinden bul
+          // Önceki kaydı tüm geçmişten bul (fullData kullanıyoruz)
           const prevRecord = fullData
             .filter(r => r[1] === name && new Date(r[0]) < date)
-            .pop();
+            .pop(); // Sıralı olduğu için pop() en son (yani en yakın) önceki tarihi verir
 
           stores[name] = {
             last: { date, comments, score },
@@ -245,7 +229,8 @@
         const s = stores[name];
         const cDiff = s.last.comments - s.prev.comments;
         const sDiff = s.last.score - s.prev.score;
-        const percentChange = s.prev.comments > 0 ? ((cDiff / s.prev.comments) * 100).toFixed(1) : "0.0";
+        // Hata düzeltmesi: pChange değişken ismi percentChange olarak kullanılmıştı.
+        const pChange = s.prev.comments > 0 ? ((cDiff / s.prev.comments) * 100).toFixed(1) : "0.0";
 
         const tr = document.createElement('tr');
         tr.className = "hover:bg-slate-50/50 transition-colors";
@@ -257,7 +242,7 @@
           <td class="text-center font-bold text-emerald-700">${s.last.score.toFixed(1)} ★</td>
           <td class="text-center font-bold ${cDiff >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${cDiff > 0 ? '+' : ''}${cDiff}</td>
           <td class="text-center font-bold ${sDiff >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${sDiff > 0 ? '+' : ''}${sDiff.toFixed(1)}</td>
-          <td class="text-right"><span class="px-3 py-1 rounded-lg text-xs font-bold ${cDiff >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}">% ${percentChange}</span></td>
+          <td class="text-right"><span class="px-3 py-1 rounded-lg text-xs font-bold ${cDiff >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}">% ${pChange}</span></td>
         `;
         tableBody.appendChild(tr);
       });
@@ -266,7 +251,6 @@
     document.getElementById('dataForm').onsubmit = async (e) => {
       e.preventDefault();
       const btn = document.getElementById('submitBtn');
-      const originalText = btn.innerText;
       btn.disabled = true;
       btn.innerText = "...";
 
@@ -280,34 +264,41 @@
       try {
         await apiCall('submitData', formData);
         document.getElementById('dataForm').reset();
-        document.getElementById('tarih').value = "2026-02-09";
+        document.getElementById('tarih').valueAsDate = new Date();
+        // 1 saniye bekle ki sheets güncellensin
+        await new Promise(r => setTimeout(r, 1000));
         await refreshDashboard();
       } catch (err) {
-        console.warn("Kayıt işlemi sırasında ağ hatası oluştu ancak veri iletilmiş olabilir.");
+        // Hata olsa bile yenilemeyi dene, bazen cors hatası verse de işlem gerçekleşir
         await refreshDashboard();
       } finally {
         btn.disabled = false;
-        btn.innerText = originalText;
+        btn.innerText = "Kaydet";
       }
     };
 
     async function downloadPDF() {
       const btn = document.getElementById('pdfBtn');
-      btn.innerText = "Bekleyin...";
+      btn.innerText = "Hazırlanıyor...";
       btn.disabled = true;
+
+      const params = {
+        start: document.getElementById('filterStart').value,
+        end: document.getElementById('filterEnd').value
+      };
+
       try {
-        const base64 = await apiCall('generatePDFReport', {
-          start: document.getElementById('filterStart').value,
-          end: document.getElementById('filterEnd').value
-        });
-        if (base64) {
+        const base64 = await apiCall('generatePDFReport', params);
+        if (base64 && base64.length > 0) {
           const link = document.createElement('a');
           link.href = 'data:application/pdf;base64,' + base64;
           link.download = 'Performans_Raporu.pdf';
           link.click();
+        } else {
+          alert("Veri bulunamadı veya rapor oluşturulamadı.");
         }
       } catch (err) {
-        alert("PDF oluşturulamadı. Lütfen API ayarlarınızı kontrol edin.");
+        alert("PDF oluşturma hatası!");
       } finally {
         btn.innerText = "PDF Raporu";
         btn.disabled = false;
