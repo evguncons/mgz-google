@@ -26,7 +26,7 @@
         <p id="dateRangeText" class="text-slate-400 text-sm font-medium mt-1 italic">Veriler yükleniyor...</p>
       </div>
       <div class="flex items-center gap-3">
-        <button onclick="refreshDashboard()" class="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all" title="Yenile">
+        <button onclick="refreshDashboard()" class="p-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all" title="Verileri Yenile">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg>
         </button>
         <button onclick="downloadPDF()" id="pdfBtn" class="bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-emerald-700 shadow-lg transition-all flex items-center gap-2">
@@ -39,7 +39,7 @@
       <section class="card p-6 flex flex-col gap-4">
         <div class="flex justify-between items-center">
           <h2 class="text-sm font-bold text-emerald-800 uppercase tracking-widest">Tarih Aralığı Seç</h2>
-          <button onclick="clearFilter()" class="text-[10px] font-bold text-slate-400 hover:text-emerald-600 transition-colors uppercase">Sıfırla</button>
+          <button onclick="resetToLatest()" class="text-[10px] font-bold text-slate-400 hover:text-emerald-600 transition-colors uppercase">Son Periyoda Git</button>
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div class="space-y-1">
@@ -100,33 +100,47 @@
     let fullData = []; 
 
     window.onload = () => {
-      document.getElementById('tarih').valueAsDate = new Date();
-      clearFilter();
+      // Sayfa yüklenince direkt verileri çek ve son tarihe odaklan
       refreshDashboard();
     };
 
-    function clearFilter() {
-      const today = new Date();
-      const lastMonth = new Date();
-      lastMonth.setDate(today.getDate() - 30);
-      document.getElementById('filterStart').valueAsDate = lastMonth;
-      document.getElementById('filterEnd').valueAsDate = today;
-      // Veri varsa filtreyi uygula, yoksa bekle
-      if (fullData.length > 0) applyFilter();
+    function resetToLatest() {
+      if (fullData.length > 0) {
+        // Tüm benzersiz tarihleri bul ve sırala
+        const uniqueDates = [...new Set(fullData.map(row => {
+            const d = new Date(row[0]);
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        }))].sort();
+
+        const lastDateStr = uniqueDates[uniqueDates.length - 1];
+        // Eğer birden fazla tarih varsa, sondan bir öncekini başlangıç yap (Örn: 17.02 ve 07.02 varsa, 07.02'yi seç)
+        // Eğer sadece tek bir tarih varsa, başlangıç ve bitiş aynı gün olur
+        const startDateStr = uniqueDates.length > 1 ? uniqueDates[uniqueDates.length - 2] : lastDateStr;
+
+        document.getElementById('filterStart').value = startDateStr;
+        document.getElementById('filterEnd').value = lastDateStr;
+        
+        // Veri girişi için varsayılan olarak son tarihi öner
+        document.getElementById('tarih').value = lastDateStr;
+        
+        applyFilter();
+      }
     }
 
     async function apiCall(action, params = {}) {
       const url = new URL(API_URL);
       url.searchParams.append('action', action);
-      // Cache-busting: Tarayıcının eski veriyi getirmesini engelle
-      url.searchParams.append('_t', Date.now());
+      url.searchParams.append('_t', Date.now()); // Cache busting
       
       Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
       
       try {
         const response = await fetch(url.toString(), {
           method: "GET",
-          redirect: "follow" // Yönlendirmeleri takip et
+          redirect: "follow"
         });
 
         if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
@@ -135,7 +149,6 @@
         try {
           return JSON.parse(text);
         } catch (e) {
-          // Eğer submitData işlemiyse ve JSON hatası varsa (bazen boş dönebilir), başarılı say
           if (action === 'submitData') return { success: true };
           throw new Error("Sunucudan geçerli veri alınamadı.");
         }
@@ -154,7 +167,6 @@
         fullData = await apiCall('getDashboardData');
         
         if (!Array.isArray(fullData)) {
-            // Eğer veri boşsa ama hata yoksa, boş dizi kabul et
             if (fullData && fullData.success === false) {
                  throw new Error(fullData.error || "Bilinmeyen hata");
             }
@@ -163,7 +175,10 @@
 
         // Verileri tarihe göre sırala (Eskiden yeniye)
         fullData.sort((a, b) => new Date(a[0]) - new Date(b[0]));
-        applyFilter(); 
+        
+        // Veriler yüklendikten sonra filtreyi otomatik olarak son PERİYODA ayarla
+        resetToLatest();
+        
       } catch (e) {
         console.error("Dashboard yüklenemedi", e);
         tableBody.innerHTML = `<tr><td colspan="8" class="p-10 text-center text-red-500 font-bold">Veri yüklenemedi: ${e.message}.<br>Lütfen internet bağlantınızı kontrol edin veya sayfayı yenileyin.</td></tr>`;
@@ -173,19 +188,23 @@
     }
 
     function applyFilter() {
-      const startInput = document.getElementById('filterStart').value;
-      const endInput = document.getElementById('filterEnd').value;
+      const startVal = document.getElementById('filterStart').value;
+      const endVal = document.getElementById('filterEnd').value;
       
-      if (!startInput || !endInput) return;
+      if (!startVal || !endVal) return;
 
-      const start = new Date(startInput);
-      const end = new Date(endInput);
-      end.setHours(23, 59, 59);
+      // Saat dilimi hatasını önlemek için tarihleri dikkatli oluştur
+      const start = new Date(startVal);
+      start.setHours(0, 0, 0, 0);
+      
+      const end = new Date(endVal);
+      end.setHours(23, 59, 59, 999);
 
       document.getElementById('dateRangeText').innerText = `${start.toLocaleDateString('tr-TR')} - ${end.toLocaleDateString('tr-TR')} aralığı`;
 
       const filtered = fullData.filter(row => {
         const d = new Date(row[0]);
+        // Sadece tarih kısmını karşılaştırmak için saat dilimi farkını tolere et
         return d >= start && d <= end;
       });
 
@@ -197,7 +216,7 @@
       tableBody.innerHTML = '';
       
       if (!filtered || filtered.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="8" class="p-20 text-center text-slate-400 font-medium">Bu aralıkta veri yok.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="8" class="p-20 text-center text-slate-400 font-medium">Bu tarihte veri bulunamadı.</td></tr>';
         return;
       }
 
@@ -209,12 +228,13 @@
         const comments = parseInt(row[2]) || 0;
         const score = parseFloat(row[3]) || 0;
 
-        // O tarih aralığındaki en son kaydı güncelle
+        // O tarih aralığındaki en son kaydı güncelle (Bitiş tarihi verisi)
         if (!stores[name] || date >= stores[name].last.date) {
           // Önceki kaydı tüm geçmişten bul (fullData kullanıyoruz)
+          // Bitiş tarihi verisinden daha eski olan en son kaydı bul
           const prevRecord = fullData
             .filter(r => r[1] === name && new Date(r[0]) < date)
-            .pop(); // Sıralı olduğu için pop() en son (yani en yakın) önceki tarihi verir
+            .pop();
 
           stores[name] = {
             last: { date, comments, score },
@@ -230,7 +250,6 @@
         const cDiff = s.last.comments - s.prev.comments;
         const sDiff = s.last.score - s.prev.score;
         
-        // Yüzde hesabı sadece Yorum Sayısı içindir (Puan için yüzdesel artış yanıltıcı olabilir)
         let pChange = "0.0";
         if (s.prev.comments > 0) {
              pChange = ((cDiff / s.prev.comments) * 100).toFixed(1);
@@ -268,12 +287,12 @@
       try {
         await apiCall('submitData', formData);
         document.getElementById('dataForm').reset();
-        document.getElementById('tarih').valueAsDate = new Date();
-        // 1 saniye bekle ki sheets güncellensin
-        await new Promise(r => setTimeout(r, 1000));
-        await refreshDashboard();
+        
+        // Veri kaydedildikten sonra 1.5 sn bekle ve dashboardu son veriye göre yenile
+        await new Promise(r => setTimeout(r, 1500));
+        await refreshDashboard(); 
+        
       } catch (err) {
-        // Hata olsa bile yenilemeyi dene, bazen cors hatası verse de işlem gerçekleşir
         await refreshDashboard();
       } finally {
         btn.disabled = false;
