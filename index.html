@@ -98,15 +98,15 @@
   <script>
     const API_URL = "https://script.google.com/macros/s/AKfycbz29zzy7qchsQTHaV6DYR10W6xoGgRWyy5OSlqZAlQ_I-I-fAX96N6ExR72St0fXUgcOA/exec";
     let fullData = []; 
+    // PDF için ekrandaki veriyi saklayacak değişken
+    let pdfExportData = [];
 
     window.onload = () => {
-      // Sayfa yüklenince direkt verileri çek ve son tarihe odaklan
       refreshDashboard();
     };
 
     function resetToLatest() {
       if (fullData.length > 0) {
-        // Tüm benzersiz tarihleri bul ve sırala
         const uniqueDates = [...new Set(fullData.map(row => {
             const d = new Date(row[0]);
             const yyyy = d.getFullYear();
@@ -116,14 +116,10 @@
         }))].sort();
 
         const lastDateStr = uniqueDates[uniqueDates.length - 1];
-        // Eğer birden fazla tarih varsa, sondan bir öncekini başlangıç yap (Örn: 17.02 ve 07.02 varsa, 07.02'yi seç)
-        // Eğer sadece tek bir tarih varsa, başlangıç ve bitiş aynı gün olur
         const startDateStr = uniqueDates.length > 1 ? uniqueDates[uniqueDates.length - 2] : lastDateStr;
 
         document.getElementById('filterStart').value = startDateStr;
         document.getElementById('filterEnd').value = lastDateStr;
-        
-        // Veri girişi için varsayılan olarak son tarihi öner
         document.getElementById('tarih').value = lastDateStr;
         
         applyFilter();
@@ -133,7 +129,7 @@
     async function apiCall(action, params = {}) {
       const url = new URL(API_URL);
       url.searchParams.append('action', action);
-      url.searchParams.append('_t', Date.now()); // Cache busting
+      url.searchParams.append('_t', Date.now()); 
       
       Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
       
@@ -167,21 +163,16 @@
         fullData = await apiCall('getDashboardData');
         
         if (!Array.isArray(fullData)) {
-            if (fullData && fullData.success === false) {
-                 throw new Error(fullData.error || "Bilinmeyen hata");
-            }
+            if (fullData && fullData.success === false) throw new Error(fullData.error);
             fullData = []; 
         }
 
-        // Verileri tarihe göre sırala (Eskiden yeniye)
         fullData.sort((a, b) => new Date(a[0]) - new Date(b[0]));
-        
-        // Veriler yüklendikten sonra filtreyi otomatik olarak son PERİYODA ayarla
         resetToLatest();
         
       } catch (e) {
         console.error("Dashboard yüklenemedi", e);
-        tableBody.innerHTML = `<tr><td colspan="8" class="p-10 text-center text-red-500 font-bold">Veri yüklenemedi: ${e.message}.<br>Lütfen internet bağlantınızı kontrol edin veya sayfayı yenileyin.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="8" class="p-10 text-center text-red-500 font-bold">Veri yüklenemedi: ${e.message}</td></tr>`;
       } finally {
         loader.classList.add('hidden');
       }
@@ -193,7 +184,6 @@
       
       if (!startVal || !endVal) return;
 
-      // Saat dilimi hatasını önlemek için tarihleri dikkatli oluştur
       const start = new Date(startVal);
       start.setHours(0, 0, 0, 0);
       
@@ -204,7 +194,6 @@
 
       const filtered = fullData.filter(row => {
         const d = new Date(row[0]);
-        // Sadece tarih kısmını karşılaştırmak için saat dilimi farkını tolere et
         return d >= start && d <= end;
       });
 
@@ -214,6 +203,7 @@
     function updateUI(filtered) {
       const tableBody = document.getElementById('dataTable');
       tableBody.innerHTML = '';
+      pdfExportData = []; // PDF verisini sıfırla
       
       if (!filtered || filtered.length === 0) {
         tableBody.innerHTML = '<tr><td colspan="8" class="p-20 text-center text-slate-400 font-medium">Bu tarihte veri bulunamadı.</td></tr>';
@@ -228,10 +218,7 @@
         const comments = parseInt(row[2]) || 0;
         const score = parseFloat(row[3]) || 0;
 
-        // O tarih aralığındaki en son kaydı güncelle (Bitiş tarihi verisi)
         if (!stores[name] || date >= stores[name].last.date) {
-          // Önceki kaydı tüm geçmişten bul (fullData kullanıyoruz)
-          // Bitiş tarihi verisinden daha eski olan en son kaydı bul
           const prevRecord = fullData
             .filter(r => r[1] === name && new Date(r[0]) < date)
             .pop();
@@ -250,22 +237,30 @@
         const cDiff = s.last.comments - s.prev.comments;
         const sDiff = s.last.score - s.prev.score;
         
-        // Yüzde hesabı Puan Değişimine göre
         let pChange = "0.0";
         if (s.prev.score > 0) {
              pChange = ((sDiff / s.prev.score) * 100).toFixed(1);
         }
 
-        // Renk mantığı (Yorum Farkı - cDiff)
-        const cDiffColor = cDiff > 0 ? 'text-emerald-600' : (cDiff < 0 ? 'text-rose-600' : 'text-slate-400');
+        // PDF için veriyi sakla
+        pdfExportData.push({
+            name: name,
+            prevC: s.prev.comments,
+            prevS: s.prev.score.toFixed(1),
+            newC: s.last.comments,
+            newS: s.last.score.toFixed(1),
+            cDiff: cDiff,
+            sDiff: sDiff.toFixed(1),
+            pChange: pChange
+        });
 
-        // Renk mantığı (Puan Farkı - sDiff)
-        let sDiffColor = "text-slate-400"; // Nötr
+        const cDiffColor = cDiff > 0 ? 'text-emerald-600' : (cDiff < 0 ? 'text-rose-600' : 'text-slate-400');
+        
+        let sDiffColor = "text-slate-400";
         if (sDiff > 0) sDiffColor = "text-emerald-600";
         else if (sDiff < 0) sDiffColor = "text-rose-600";
 
-        // Renk mantığı (Puan Değişimi % - pChange)
-        let badgeColor = "bg-slate-100 text-slate-500"; // Nötr (0.0)
+        let badgeColor = "bg-slate-100 text-slate-500"; 
         if (sDiff > 0) badgeColor = "bg-emerald-50 text-emerald-600";
         else if (sDiff < 0) badgeColor = "bg-rose-50 text-rose-600";
 
@@ -301,11 +296,8 @@
       try {
         await apiCall('submitData', formData);
         document.getElementById('dataForm').reset();
-        
-        // Veri kaydedildikten sonra 1.5 sn bekle ve dashboardu son veriye göre yenile
         await new Promise(r => setTimeout(r, 1500));
         await refreshDashboard(); 
-        
       } catch (err) {
         await refreshDashboard();
       } finally {
@@ -319,20 +311,22 @@
       btn.innerText = "Hazırlanıyor...";
       btn.disabled = true;
 
-      const params = {
-        start: document.getElementById('filterStart').value,
-        end: document.getElementById('filterEnd').value
-      };
-
+      // ARTIK EKRANDAKİ VERİYİ GÖNDERİYORUZ
+      const reportRange = document.getElementById('dateRangeText').innerText;
+      
       try {
-        const base64 = await apiCall('generatePDFReport', params);
+        const base64 = await apiCall('generatePDFReport', {
+            reportData: JSON.stringify(pdfExportData),
+            reportRange: reportRange
+        });
+        
         if (base64 && base64.length > 0) {
           const link = document.createElement('a');
           link.href = 'data:application/pdf;base64,' + base64;
           link.download = 'Performans_Raporu.pdf';
           link.click();
         } else {
-          alert("Veri bulunamadı veya rapor oluşturulamadı.");
+          alert("Rapor oluşturulamadı.");
         }
       } catch (err) {
         alert("PDF oluşturma hatası!");
