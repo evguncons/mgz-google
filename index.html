@@ -86,7 +86,7 @@
               <th class="text-center">Yeni Puan</th>
               <th class="text-center">Yorum Farkı</th>
               <th class="text-center">Puan Farkı</th>
-              <th class="text-right">Değişim %</th>
+              <th class="text-right">Yorum Artışı %</th>
             </tr>
           </thead>
           <tbody id="dataTable"></tbody>
@@ -229,8 +229,12 @@
         const s = stores[name];
         const cDiff = s.last.comments - s.prev.comments;
         const sDiff = s.last.score - s.prev.score;
-        // Hata düzeltmesi: pChange değişken ismi percentChange olarak kullanılmıştı.
-        const pChange = s.prev.comments > 0 ? ((cDiff / s.prev.comments) * 100).toFixed(1) : "0.0";
+        
+        // Yüzde hesabı sadece Yorum Sayısı içindir (Puan için yüzdesel artış yanıltıcı olabilir)
+        let pChange = "0.0";
+        if (s.prev.comments > 0) {
+             pChange = ((cDiff / s.prev.comments) * 100).toFixed(1);
+        }
 
         const tr = document.createElement('tr');
         tr.className = "hover:bg-slate-50/50 transition-colors";
