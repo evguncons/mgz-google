@@ -86,7 +86,7 @@
               <th class="text-center">Yeni Puan</th>
               <th class="text-center">Yorum Farkı</th>
               <th class="text-center">Puan Farkı</th>
-              <th class="text-right">Yorum Artışı %</th>
+              <th class="text-right">Puan Değişimi %</th>
             </tr>
           </thead>
           <tbody id="dataTable"></tbody>
@@ -250,10 +250,24 @@
         const cDiff = s.last.comments - s.prev.comments;
         const sDiff = s.last.score - s.prev.score;
         
+        // Yüzde hesabı Puan Değişimine göre
         let pChange = "0.0";
-        if (s.prev.comments > 0) {
-             pChange = ((cDiff / s.prev.comments) * 100).toFixed(1);
+        if (s.prev.score > 0) {
+             pChange = ((sDiff / s.prev.score) * 100).toFixed(1);
         }
+
+        // Renk mantığı (Yorum Farkı - cDiff)
+        const cDiffColor = cDiff > 0 ? 'text-emerald-600' : (cDiff < 0 ? 'text-rose-600' : 'text-slate-400');
+
+        // Renk mantığı (Puan Farkı - sDiff)
+        let sDiffColor = "text-slate-400"; // Nötr
+        if (sDiff > 0) sDiffColor = "text-emerald-600";
+        else if (sDiff < 0) sDiffColor = "text-rose-600";
+
+        // Renk mantığı (Puan Değişimi % - pChange)
+        let badgeColor = "bg-slate-100 text-slate-500"; // Nötr (0.0)
+        if (sDiff > 0) badgeColor = "bg-emerald-50 text-emerald-600";
+        else if (sDiff < 0) badgeColor = "bg-rose-50 text-rose-600";
 
         const tr = document.createElement('tr');
         tr.className = "hover:bg-slate-50/50 transition-colors";
@@ -263,9 +277,9 @@
           <td class="text-center text-slate-500 font-medium">${s.prev.score.toFixed(1)} ★</td>
           <td class="text-center font-bold">${s.last.comments}</td>
           <td class="text-center font-bold text-emerald-700">${s.last.score.toFixed(1)} ★</td>
-          <td class="text-center font-bold ${cDiff >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${cDiff > 0 ? '+' : ''}${cDiff}</td>
-          <td class="text-center font-bold ${sDiff >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${sDiff > 0 ? '+' : ''}${sDiff.toFixed(1)}</td>
-          <td class="text-right"><span class="px-3 py-1 rounded-lg text-xs font-bold ${cDiff >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}">% ${pChange}</span></td>
+          <td class="text-center font-bold ${cDiffColor}">${cDiff > 0 ? '+' : ''}${cDiff}</td>
+          <td class="text-center font-bold ${sDiffColor}">${sDiff > 0 ? '+' : ''}${sDiff.toFixed(1)}</td>
+          <td class="text-right"><span class="px-3 py-1 rounded-lg text-xs font-bold ${badgeColor}">% ${pChange}</span></td>
         `;
         tableBody.appendChild(tr);
       });
